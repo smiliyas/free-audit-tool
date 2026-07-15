@@ -279,6 +279,10 @@ class LW_Audit_REST_Controller {
 
 		$audit_id = self::insert_row( $email, $url_audited, $payload, $request );
 		if ( ! $audit_id ) {
+			global $wpdb;
+			$db_error = '' !== $wpdb->last_error ? $wpdb->last_error : 'unknown database insert error';
+			self::log_error( 'emails', hash( 'sha256', $email . '|' . $url_audited ), $db_error );
+			error_log( '[lw-audit-store] /emails insert failed: ' . $db_error );
 			return new WP_REST_Response( array( 'ok' => false, 'error' => 'db insert failed' ), 500 );
 		}
 

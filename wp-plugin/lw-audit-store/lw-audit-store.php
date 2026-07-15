@@ -56,6 +56,7 @@ require_once LW_AUDIT_DIR . 'includes/class-admin-page.php';
 register_activation_hook( __FILE__, array( 'LW_Audit_Installer', 'activate' ) );
 register_deactivation_hook( __FILE__, array( 'LW_Audit_Installer', 'deactivate' ) );
 
+add_action( 'plugins_loaded', array( 'LW_Audit_Installer', 'maybe_upgrade' ) );
 add_action( 'rest_api_init', array( 'LW_Audit_REST_Controller', 'register_routes' ) );
 add_action( 'admin_init', array( 'LW_Audit_Settings', 'register_settings' ) );
 add_action( 'admin_menu', array( 'LW_Audit_Admin_Page', 'register_pages' ) );

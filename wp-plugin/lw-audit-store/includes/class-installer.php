@@ -22,6 +22,19 @@ class LW_Audit_Installer {
 	const OPTION_DB_VERSION = 'lw_audit_db_version';
 
 	/**
+	 * Apply schema changes after a plugin file update.
+	 *
+	 * WordPress only calls the activation hook when the plugin is explicitly
+	 * activated. Deploying a new plugin version over an already-active install
+	 * does not call it, so compare the stored schema version during bootstrap.
+	 */
+	public static function maybe_upgrade() {
+		if ( get_option( self::OPTION_DB_VERSION ) !== LW_AUDIT_DB_VERSION ) {
+			self::activate();
+		}
+	}
+
+	/**
 	 * Activation hook entry point.
 	 *
 	 * Idempotent: safe to call on every activation / re-activation. dbDelta
