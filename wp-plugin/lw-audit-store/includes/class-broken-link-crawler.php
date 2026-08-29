@@ -24,8 +24,12 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 	const CHECK_TIME_S           = 25;
 	const FETCH_TIMEOUT          = 10;
 	const LINK_TIMEOUT           = 8;
+	const WORDPRESS_DETECT_TIMEOUT = 8;
+	const WORDPRESS_DETECT_BODY_SIZE = 131072;
 	const CONCURRENCY            = 5;
 	const USER_AGENT             = 'Mozilla/5.0 (compatible; LinkWhisperBrokenLinkBot/1.0; +https://linkwhisper.com/bot)';
+	const WORDPRESS_ONLY_MESSAGE = 'This free broken link checker currently supports WordPress sites only. We could not detect WordPress on this site. Please enter a WordPress site URL.';
+	const WORDPRESS_DETECTION_ERROR_MESSAGE = 'This free broken link checker currently supports WordPress sites only. We could not confirm WordPress on this site. Please check the URL and try again.';
 
 	/**
 	 * Crawl internal HTML pages, collect HTTP(S) destinations, then check them.
@@ -37,6 +41,11 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 		$site = self::site_context( $raw_url );
 		if ( is_wp_error( $site ) ) {
 			return $site;
+		}
+
+		$wordpress = self::detect_wordpress( $site );
+		if ( is_wp_error( $wordpress ) ) {
+			return $wordpress;
 		}
 
 		$crawl_started = microtime( true );
@@ -167,7 +176,138 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 		return array(
 			'origin'    => $origin,
 			'start_url' => $start_url,
+			'rest_url'  => $origin . '/wp-json/',
 		);
+	}
+
+	/**
+	 * Admit only sites with a WordPress fingerprint before crawling pages.
+	 *
+	 * The homepage is the first signal. The REST root is a bounded fallback for
+	 * themes that remove generator tags and WordPress asset paths from markup.
+	 *
+	 * @param array $site Normalized site context.
+	 * @return true|WP_Error
+	 */
+	private static function detect_wordpress( array $site ) {
+		$page_response = wp_remote_get(
+			$site['start_url'],
+			array(
+				'timeout'             => self::WORDPRESS_DETECT_TIMEOUT,
+				'redirection'         => 5,
+				'limit_response_size' => self::WORDPRESS_DETECT_BODY_SIZE,
+				'user-agent'          => self::USER_AGENT,
+				'headers'             => array(
+					'Accept' => 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+				),
+			)
+		);
+
+		if ( ! is_wp_error( $page_response ) ) {
+			$page_code = (int) wp_remote_retrieve_response_code( $page_response );
+			if ( $page_code >= 200 && $page_code < 400 && self::has_wordpress_fingerprint(
+				(string) wp_remote_retrieve_body( $page_response ),
+				array(
+					'link' => (string) wp_remote_retrieve_header( $page_response, 'link' ),
+				)
+			) ) {
+				return true;
+			}
+		}
+
+		$rest_response = wp_remote_get(
+			$site['rest_url'],
+			array(
+				'timeout'             => self::WORDPRESS_DETECT_TIMEOUT,
+				'redirection'         => 2,
+				'limit_response_size' => 65536,
+				'user-agent'          => self::USER_AGENT,
+				'headers'             => array( 'Accept' => 'application/json' ),
+			)
+		);
+
+		if ( ! is_wp_error( $rest_response ) && self::is_wordpress_rest_response( $rest_response ) ) {
+			return true;
+		}
+
+		if ( is_wp_error( $page_response ) || is_wp_error( $rest_response ) ) {
+			return new WP_Error(
+				'lw_wordpress_detection_failed',
+				self::WORDPRESS_DETECTION_ERROR_MESSAGE,
+				array( 'status' => 422 )
+			);
+		}
+
+		return new WP_Error(
+			'lw_not_wordpress',
+			self::WORDPRESS_ONLY_MESSAGE,
+			array( 'status' => 422 )
+		);
+	}
+
+	/**
+	 * Detect common WordPress signals in a public HTML response.
+	 *
+	 * @param string $html    Response body.
+	 * @param array  $headers Selected response headers.
+	 * @return bool
+	 */
+	private static function has_wordpress_fingerprint( $html, array $headers ) {
+		$html = (string) $html;
+		$link = isset( $headers['link'] ) ? strtolower( (string) $headers['link'] ) : '';
+
+		if ( false !== strpos( $link, 'api.w.org' ) || false !== stripos( $html, 'api.w.org' ) ) {
+			return true;
+		}
+
+		$generator_pattern = '#<meta\\b[^>]*(?:name\\s*=\\s*["\\\']generator["\\\'][^>]*content\\s*=\\s*["\\\'][^"\\\']*wordpress|content\\s*=\\s*["\\\'][^"\\\']*wordpress[^"\\\']*["\\\'][^>]*name\\s*=\\s*["\\\']generator["\\\'])#i';
+		if ( preg_match( $generator_pattern, $html ) ) {
+			return true;
+		}
+
+		$asset_pattern = '#<(?:script|link|img|style)\\b[^>]*(?:src|href)\\s*=\\s*["\\\'][^"\\\']*(?:/wp-content/|/wp-includes/)#i';
+		return (bool) preg_match( $asset_pattern, $html );
+	}
+
+	/**
+	 * Confirm the WordPress REST root exposes the standard wp/v2 namespace.
+	 *
+	 * @param mixed $response WordPress HTTP response.
+	 * @return bool
+	 */
+	private static function is_wordpress_rest_response( $response ) {
+		if ( ! is_array( $response ) && ! is_object( $response ) ) {
+			return false;
+		}
+
+		$code = (int) wp_remote_retrieve_response_code( $response );
+		if ( $code < 200 || $code >= 300 ) {
+			return false;
+		}
+
+		$body = (string) wp_remote_retrieve_body( $response );
+		$data = json_decode( $body, true );
+		if ( ! is_array( $data ) ) {
+			return false;
+		}
+
+		if ( ! empty( $data['namespaces'] ) && is_array( $data['namespaces'] ) ) {
+			foreach ( $data['namespaces'] as $namespace ) {
+				if ( 'wp/v2' === strtolower( (string) $namespace ) ) {
+					return true;
+				}
+			}
+		}
+
+		if ( ! empty( $data['routes'] ) && is_array( $data['routes'] ) ) {
+			foreach ( array_keys( $data['routes'] ) as $route ) {
+				if ( false !== strpos( strtolower( (string) $route ), '/wp/v2/' ) ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
 	}
 
 	/**

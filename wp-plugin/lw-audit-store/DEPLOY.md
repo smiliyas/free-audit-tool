@@ -1,6 +1,6 @@
 # LW Audit Store — Deploy Guide
 
-Plugin version: 0.5.0
+Plugin version: 0.5.1
 Target: linkwhisper.com (production WP)
 
 ---
@@ -8,7 +8,7 @@ Target: linkwhisper.com (production WP)
 ## What this plugin does
 
 - **`POST /wp-json/lw/v1/scan`** — crawls a public website (up to 75 pages, 50s budget) and returns a link-health report. Used by the React audit page on linkwhisper.com. Replaces the old Netlify function.
-- **`POST /wp-json/lw/v1/broken-links`** — crawls internal HTML pages, checks up to 150 unique HTTP(S) destinations, and returns broken links, redirects, timeouts, and source pages. It does not crawl external sites.
+- **`POST /wp-json/lw/v1/broken-links`** — confirms the submitted site is WordPress, then crawls internal HTML pages, checks up to 150 unique HTTP(S) destinations, and returns broken links, redirects, timeouts, and source pages. Non-WordPress sites are denied before crawling; external sites are checked as destinations but not crawled.
 - **`POST /wp-json/lw/v1/emails`** — captures the visitor email after they see results, sends the audit email via `wp_mail`, and subscribes them to Kit.com. Failed Kit syncs are retried hourly via WP-Cron.
 - **WP admin → Settings → LW Audit** — operator config: Kit credentials, sender identity, CORS allow-list, physical address (CAN-SPAM).
 - **WP admin → LW Audit (top-level menu)** — read-only dashboard listing every captured submission and its delivery status.
@@ -136,12 +136,13 @@ If signed requests are ever enabled: rotate the secret in **Settings → LW Audi
 
 ---
 
-## Known limitations (v0.5.0)
+## Known limitations (v0.5.1)
 
 - **Inline mail + Kit dispatch.** The capture endpoint sends `wp_mail` and calls Kit synchronously. Kit timeout is 3s; total inline budget is ~5s worst case. Async dispatch (background queue) is a follow-up.
 - **No HMAC enforcement.** The controller accepts unsigned POSTs from allow-listed origins. Add HMAC enforcement once the operator workflow is settled.
 - **Crawler is single-process.** No queue, no horizontal scaling. Each scan ties up one PHP-FPM worker for up to 50s. With the 10/hour rate limit per IP this is fine; revisit if traffic grows.
 - **Broken-link checker is bounded.** It follows internal pages only, checks at most 50 pages and 150 unique destinations, and does not execute JavaScript. Redirects and timeouts are reported separately. The response includes a warning when the result is partial.
+- **WordPress detection uses public fingerprints.** A heavily customized WordPress site that removes common asset, generator, and REST signals may be asked to retry even though it runs WordPress.
 - **Single `wp_mail` retry only.** If the inline send fails, one retry fires 30 min later via `wp_schedule_single_event`. After the second failure the row is marked `mail_dead` and not retried again. See Failure States for operator recovery steps.
 
 ---

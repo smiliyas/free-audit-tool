@@ -4,7 +4,7 @@ Tags: linkwhisper, audit, internal-use
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 0.5.0
+Stable tag: 0.5.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -36,6 +36,9 @@ The plugin is for LinkWhisper internal use and is not intended for wp.org.
 * Delete (uninstall) — drops `wp_lw_audits` + `wp_lw_audits_errors` and removes the schema-version option. No undo. Take a mysqldump first if uncertain.
 
 == Changelog ==
+
+= 0.5.1 =
+* Broken-link checker now confirms WordPress from the public homepage or REST root before crawling. Non-WordPress sites receive a clear WordPress-only message and are denied before any link crawl.
 
 = 0.5.0 =
 * Phase 5: add the bounded HTTP broken-link checker (`POST /lw/v1/broken-links`). It follows internal pages, validates unique HTTP(S) destinations, and reports broken links, redirects, timeouts, source pages, and partial-scan warnings.

@@ -2,7 +2,7 @@
 
 WordPress plugin powering the Free Audit Tool at `linkwhisper.com/internal-link-checker` and the Free Broken Link Checker at `linkwhisper.com/tools/broken-link-checker`.
 
-**Version:** 0.5.0
+**Version:** 0.5.1
 **Build:** Anmoll + Claude (Phase 3, in-house WP plugin)
 **Operate:** Matt / Iliya
 **Status:** ship-candidate — verified end-to-end against wp-now sandbox 2026-05-05
@@ -39,7 +39,7 @@ The React frontend (in `smiliyas/linkwhisper-react` → `src/pages/LinkChecker.t
 | Surface | Purpose |
 |---|---|
 | `POST /wp-json/lw/v1/scan` | Crawls a public site (≤75 pages, 50s budget). Returns link-health report. |
-| `POST /wp-json/lw/v1/broken-links` | Crawls internal HTML pages, checks up to 150 unique HTTP(S) destinations, and returns broken links, redirects, timeouts, and source pages. |
+| `POST /wp-json/lw/v1/broken-links` | Confirms WordPress first, then crawls internal HTML pages and checks up to 150 unique HTTP(S) destinations. Returns broken links, redirects, timeouts, and source pages. Non-WordPress sites are denied before crawling. |
 | `POST /wp-json/lw/v1/emails` | Captures the visitor email. Sends the audit email via `wp_mail`. Subscribes them to Kit.com. |
 | **WP admin → Settings → LW Audit** | Operator config: HMAC secret, Kit credentials, sender identity, CORS allow-list, physical mailing address (CAN-SPAM). |
 | **WP admin → LW Audit** (top-level menu) | Read-only dashboard listing every captured submission and its delivery status. |
@@ -61,6 +61,7 @@ These are the changes layered on top of v0.3.0 before this hand-off. Read them s
 5. **`DEPLOY.md` expanded** — added pre-install SMTP checklist (4 items, see below), CORS verify-curl, full failure-states table, operator recovery steps for `mail_dead` and `kit_dead`.
 
 6. **Bounded HTTP broken-link checker** — added `POST /lw/v1/broken-links`, which follows internal pages only and validates unique HTTP(S) destinations without crawling external sites. The endpoint reports when page, destination, or time caps make the result partial.
+7. **WordPress-only admission check** — the broken-link endpoint checks the homepage and WordPress REST root before crawling. Sites without a recognized WordPress fingerprint receive a clear `lw_not_wordpress` response.
 
 ---
 
@@ -180,12 +181,13 @@ lw-audit-store/
 
 ---
 
-## Known limitations (v0.5.0)
+## Known limitations (v0.5.1)
 
 - **Inline `wp_mail` + Kit dispatch.** Total budget ~5s worst case (3s Kit timeout + 2s wp_mail). Async dispatch (Action Scheduler / background queue) is a follow-up once volume justifies it.
 - **No HMAC enforcement on capture.** Controller accepts unsigned POSTs from allow-listed origins. Enforcement is a follow-up once operator workflow is settled.
 - **Crawler is single-process.** No queue, no horizontal scaling. Each scan ties up one PHP-FPM worker for up to 50s. Rate-limited to 10/hr per IP.
 - **Broken-link checker is intentionally bounded.** It follows internal pages only, checks at most 50 pages and 150 unique destinations, and does not execute JavaScript. Redirects and timeouts are reported separately from HTTP errors; a partial-scan warning is returned when a cap is reached.
+- **WordPress detection uses public fingerprints.** A heavily customized WordPress site that removes common asset, generator, and REST signals may be asked to retry even though it runs WordPress.
 - **`wp_mail` retry is one-shot.** Single 30-min retry. If both fail, `mail_dead` and operator handles manually. Not enough volume yet to justify a multi-attempt scheduler.
 
 ---

@@ -463,10 +463,18 @@ class LW_Audit_REST_Controller {
 			$err_data = $result->get_error_data();
 			$status   = ( is_array( $err_data ) && isset( $err_data['status'] ) ) ? (int) $err_data['status'] : 500;
 			if ( 'lw_blocked' === $result->get_error_code() ) {
-				return new WP_REST_Response( array( 'error' => $result->get_error_message() ), 200 );
+				return new WP_REST_Response( array(
+					'error'   => $result->get_error_message(),
+					'code'    => $result->get_error_code(),
+					'message' => $result->get_error_message(),
+				), 200 );
 			}
 			self::log_error( 'broken_links', hash( 'sha256', $url ), $result->get_error_code() . ': ' . $result->get_error_message() );
-			return new WP_REST_Response( array( 'error' => $result->get_error_message() ), $status );
+			return new WP_REST_Response( array(
+				'error'   => $result->get_error_message(),
+				'code'    => $result->get_error_code(),
+				'message' => $result->get_error_message(),
+			), $status );
 		}
 
 		return new WP_REST_Response( $result, 200 );

@@ -3,7 +3,7 @@
  * Plugin Name:       LW Audit Store
  * Plugin URI:        https://linkwhisper.com/
  * Description:       Free Audit Tool backend — internal-link, broken-link, and sitemap endpoints + capture endpoint + email send + Kit.com sync + hourly retry cron + admin dashboard. System of record for the free-tool acquisition funnel.
- * Version:           0.5.0
+ * Version:           0.5.1
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            LinkWhisper
@@ -22,6 +22,8 @@
  * Phase 4 scope (v0.4.0): adds edges[] to /scan fullReport, tool column to
  * DB schema, tool-aware email subjects. Enables Internal Link Map tool.
  * Phase 5 scope (v0.5.0): adds the bounded HTTP broken-link checker route.
+ * Phase 5.1 scope (v0.5.1): gates the broken-link checker to detected
+ * WordPress sites before any page crawl.
  *
  * @package LW_Audit_Store
  */
@@ -35,7 +37,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Plugin constants. Bump LW_AUDIT_DB_VERSION on any schema change so the
  * installer re-runs dbDelta on the next activation / version check.
  */
-define( 'LW_AUDIT_VERSION', '0.5.0' );
+define( 'LW_AUDIT_VERSION', '0.5.1' );
 // DB v4: adds tool column for multi-tool segmentation (link-auditor, link-map, etc.).
 define( 'LW_AUDIT_DB_VERSION', '4' );
 define( 'LW_AUDIT_DIR', plugin_dir_path( __FILE__ ) );
