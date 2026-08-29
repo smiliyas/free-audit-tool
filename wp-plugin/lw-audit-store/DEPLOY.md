@@ -1,6 +1,6 @@
 # LW Audit Store — Deploy Guide
 
-Plugin version: 0.3.0
+Plugin version: 0.5.0
 Target: linkwhisper.com (production WP)
 
 ---
@@ -8,6 +8,7 @@ Target: linkwhisper.com (production WP)
 ## What this plugin does
 
 - **`POST /wp-json/lw/v1/scan`** — crawls a public website (up to 75 pages, 50s budget) and returns a link-health report. Used by the React audit page on linkwhisper.com. Replaces the old Netlify function.
+- **`POST /wp-json/lw/v1/broken-links`** — crawls internal HTML pages, checks up to 150 unique HTTP(S) destinations, and returns broken links, redirects, timeouts, and source pages. It does not crawl external sites.
 - **`POST /wp-json/lw/v1/emails`** — captures the visitor email after they see results, sends the audit email via `wp_mail`, and subscribes them to Kit.com. Failed Kit syncs are retried hourly via WP-Cron.
 - **WP admin → Settings → LW Audit** — operator config: Kit credentials, sender identity, CORS allow-list, physical address (CAN-SPAM).
 - **WP admin → LW Audit (top-level menu)** — read-only dashboard listing every captured submission and its delivery status.
@@ -90,9 +91,9 @@ If `Idempotency-Key` is missing from the Allow-Headers list, your origin isn't i
 
 ## Verify — first scan + capture
 
-1. Visit `https://linkwhisper.com/internal-link-checker`.
+1. Visit `https://linkwhisper.com/internal-link-checker` for the internal-link health audit, or `https://linkwhisper.com/tools/broken-link-checker` for the HTTP broken-link checker.
 2. Paste a small WordPress site URL (e.g. a personal blog) → **Check My Site**.
-3. Wait for results (10–50s). You should see a score, four stat cards, and the top issues.
+3. Wait for results (10–50s). The internal-link checker shows a score, four stat cards, and the top issues. The broken-link checker shows HTTP broken links, redirects, timeouts, and any partial-scan warning.
 4. Enter a test email → **Unlock report**.
 5. In WP admin → **LW Audit** → confirm the row appears with `email_status: sent` and `kit_status: synced` (or `pending` if Kit was slow — the cron will retry within an hour). If you see `email_status: mail_failed` after the curl POST, that's expected when SMTP isn't configured — see Failure States above. The retry will fire in 30 min if cron is running.
 6. Check the inbox: subject begins with `Your link health score: …`. Footer must show:
@@ -135,11 +136,12 @@ If signed requests are ever enabled: rotate the secret in **Settings → LW Audi
 
 ---
 
-## Known limitations (v0.3.0)
+## Known limitations (v0.5.0)
 
 - **Inline mail + Kit dispatch.** The capture endpoint sends `wp_mail` and calls Kit synchronously. Kit timeout is 3s; total inline budget is ~5s worst case. Async dispatch (background queue) is a follow-up.
 - **No HMAC enforcement.** The controller accepts unsigned POSTs from allow-listed origins. Add HMAC enforcement once the operator workflow is settled.
 - **Crawler is single-process.** No queue, no horizontal scaling. Each scan ties up one PHP-FPM worker for up to 50s. With the 10/hour rate limit per IP this is fine; revisit if traffic grows.
+- **Broken-link checker is bounded.** It follows internal pages only, checks at most 50 pages and 150 unique destinations, and does not execute JavaScript. Redirects and timeouts are reported separately. The response includes a warning when the result is partial.
 - **Single `wp_mail` retry only.** If the inline send fails, one retry fires 30 min later via `wp_schedule_single_event`. After the second failure the row is marked `mail_dead` and not retried again. See Failure States for operator recovery steps.
 
 ---
@@ -165,8 +167,9 @@ lw-audit-store/
 │   ├── class-settings.php     — admin Settings page
 │   ├── class-kit-client.php   — Kit.com API wrapper (3s timeout)
 │   ├── class-mailer.php       — wp_mail + template render
-│   ├── class-crawler.php      — PHP crawler (was Netlify function)
-│   ├── class-rest-controller.php — /scan + /emails routes, CORS, rate limit
+│   ├── class-crawler.php      — PHP internal-link crawler (was Netlify function)
+│   ├── class-broken-link-crawler.php — bounded HTTP destination checker
+│   ├── class-rest-controller.php — /scan + /broken-links + /emails routes, CORS, rate limit
 │   ├── class-cron.php         — hourly Kit retry
 │   └── class-admin-page.php   — read-only dashboard
 └── templates/

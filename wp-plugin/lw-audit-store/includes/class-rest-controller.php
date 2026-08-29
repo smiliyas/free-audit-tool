@@ -34,6 +34,7 @@ class LW_Audit_REST_Controller {
 	const NS                          = 'lw/v1';
 	const ROUTE                       = '/emails';
 	const ROUTE_SCAN                  = '/scan';
+	const ROUTE_BROKEN_LINKS          = '/broken-links';
 	const ROUTE_SITEMAP               = '/sitemap';
 	const RATE_LIMIT_PER_HOUR         = 5;
 	const RATE_LIMIT_WINDOW           = HOUR_IN_SECONDS;
@@ -71,6 +72,19 @@ class LW_Audit_REST_Controller {
 			array(
 				'methods'             => 'POST',
 				'callback'            => array( __CLASS__, 'handle_scan' ),
+				'permission_callback' => '__return_true',
+			),
+			array(
+				'methods'             => 'OPTIONS',
+				'callback'            => array( __CLASS__, 'handle_preflight' ),
+				'permission_callback' => '__return_true',
+			),
+		) );
+
+		register_rest_route( self::NS, self::ROUTE_BROKEN_LINKS, array(
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( __CLASS__, 'handle_broken_links' ),
 				'permission_callback' => '__return_true',
 			),
 			array(
@@ -411,6 +425,47 @@ class LW_Audit_REST_Controller {
 				return new WP_REST_Response( array( 'error' => $result->get_error_message() ), 200 );
 			}
 			self::log_error( 'scan', hash( 'sha256', $url ), $result->get_error_code() . ': ' . $result->get_error_message() );
+			return new WP_REST_Response( array( 'error' => $result->get_error_message() ), $status );
+		}
+
+		return new WP_REST_Response( $result, 200 );
+	}
+
+	/**
+	 * Broken-link handler: POST /wp-json/lw/v1/broken-links { url }.
+	 * Uses the same public rate-limit and blocked-site response conventions as
+	 * the existing internal-link scan, but calls the HTTP status crawler.
+	 */
+	public static function handle_broken_links( WP_REST_Request $request ) {
+		@set_time_limit( 65 ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged
+		wp_raise_memory_limit( 'admin' );
+
+		$payload = $request->get_json_params();
+		if ( ! is_array( $payload ) ) {
+			return new WP_REST_Response( array( 'error' => 'Invalid JSON body' ), 400 );
+		}
+
+		$url = isset( $payload['url'] ) ? trim( (string) $payload['url'] ) : '';
+		if ( '' === $url ) {
+			return new WP_REST_Response( array( 'error' => 'Missing url parameter' ), 400 );
+		}
+
+		$rate_check = self::check_scan_rate_limit();
+		if ( ! $rate_check['ok'] ) {
+			self::log_error( 'broken_link_rate_limit', $rate_check['ip_hash'], 'broken-link rate limit exceeded' );
+			return new WP_REST_Response( array(
+				'error' => 'Rate limit exceeded - try again in an hour.',
+			), 429 );
+		}
+
+		$result = LW_Broken_Link_Crawler::scan( $url );
+		if ( is_wp_error( $result ) ) {
+			$err_data = $result->get_error_data();
+			$status   = ( is_array( $err_data ) && isset( $err_data['status'] ) ) ? (int) $err_data['status'] : 500;
+			if ( 'lw_blocked' === $result->get_error_code() ) {
+				return new WP_REST_Response( array( 'error' => $result->get_error_message() ), 200 );
+			}
+			self::log_error( 'broken_links', hash( 'sha256', $url ), $result->get_error_code() . ': ' . $result->get_error_message() );
 			return new WP_REST_Response( array( 'error' => $result->get_error_message() ), $status );
 		}
 

@@ -72,6 +72,14 @@ class LW_Audit_Mailer {
 				1 === $orphan_count ? 'page' : 'pages'
 			);
 		}
+		if ( isset( $row['tool'] ) && 'broken-link-checker' === $row['tool'] ) {
+			$broken_count = isset( $row['broken_count'] ) ? intval( $row['broken_count'] ) : 0;
+			return sprintf(
+				'Your Broken Link Check — %d broken %s found',
+				$broken_count,
+				1 === $broken_count ? 'link' : 'links'
+			);
+		}
 
 		if ( null === $score ) {
 			return 'Your LinkWhisper audit is ready';
@@ -135,7 +143,9 @@ class LW_Audit_Mailer {
 		$broken_int = (int) $broken_count;
 		$orphan_int = (int) $orphan_count;
 
-		if ( 0 === $broken_int + $orphan_int ) {
+		if ( isset( $row['tool'] ) && 'broken-link-checker' === $row['tool'] ) {
+			$issue_status_block = self::issue_block_broken( $broken_count, $internal_links, $pages_crawled );
+		} elseif ( 0 === $broken_int + $orphan_int ) {
 			$issue_status_block = self::issue_block_clean( $internal_links, $pages_crawled );
 		} else {
 			$issue_status_block = self::issue_block_found( $broken_count, $orphan_count, $internal_links, $pages_crawled );
@@ -169,6 +179,57 @@ class LW_Audit_Mailer {
 		);
 
 		return strtr( $html, $replacements );
+	}
+
+	/**
+	 * Issue block for the HTTP broken-link checker. Its `internal_links` field
+	 * is the number of unique destinations checked, not a link-graph count.
+	 */
+	private static function issue_block_broken( $broken_count, $links_checked, $pages_crawled ) {
+		$b  = esc_html( $broken_count );
+		$il = esc_html( $links_checked );
+		$pc = esc_html( $pages_crawled );
+
+		if ( 0 === (int) $broken_count ) {
+			return '
+<p style="margin:0 0 8px 0;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#3BB273;">All Clear</p>
+<h2 style="margin:0 0 12px 0;font-size:22px;font-weight:700;color:#1A1F2E;line-height:1.3;">No broken links found</h2>
+<p style="margin:0 0 16px 0;font-size:14px;color:#64748B;line-height:1.6;">
+  We checked ' . $il . ' unique destinations across ' . $pc . ' pages. No HTTP errors were found in the checked sample.
+</p>';
+		}
+
+		return '
+<p style="margin:0 0 8px 0;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#3BB273;">What This Means</p>
+<h2 style="margin:0 0 16px 0;font-size:22px;font-weight:700;color:#1A1F2E;line-height:1.3;">Here is what we found</h2>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+  <tr>
+    <td style="padding:12px 0;border-bottom:1px solid #E2E8F0;vertical-align:top;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <td width="20" style="vertical-align:top;padding-top:2px;"><div style="width:8px;height:8px;border-radius:50%;background-color:#DC2626;margin-top:4px;"></div></td>
+          <td>
+            <p style="margin:0;font-size:14px;color:#1A1F2E;font-weight:600;">' . $b . ' broken ' . ( 1 === (int) $broken_count ? 'link' : 'links' ) . '</p>
+            <p style="margin:4px 0 0 0;font-size:13px;color:#64748B;line-height:1.5;">These URLs returned an HTTP error. Repair, redirect, or remove them to keep visitors and search crawlers moving.</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:12px 0;vertical-align:top;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+        <tr>
+          <td width="20" style="vertical-align:top;padding-top:2px;"><div style="width:8px;height:8px;border-radius:50%;background-color:#3BB273;margin-top:4px;"></div></td>
+          <td>
+            <p style="margin:0;font-size:14px;color:#1A1F2E;font-weight:600;">' . $il . ' unique destinations checked</p>
+            <p style="margin:4px 0 0 0;font-size:13px;color:#64748B;line-height:1.5;">Across ' . $pc . ' pages in the free checker sample.</p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>';
 	}
 
 	/**

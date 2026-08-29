@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       LW Audit Store
  * Plugin URI:        https://linkwhisper.com/
- * Description:       Free Audit Tool backend — crawler (POST /lw/v1/scan) + capture endpoint (POST /lw/v1/emails) + email send + Kit.com sync + hourly retry cron + admin dashboard. System of record for the free-tool acquisition funnel.
- * Version:           0.4.0
+ * Description:       Free Audit Tool backend — internal-link, broken-link, and sitemap endpoints + capture endpoint + email send + Kit.com sync + hourly retry cron + admin dashboard. System of record for the free-tool acquisition funnel.
+ * Version:           0.5.0
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            LinkWhisper
@@ -21,6 +21,7 @@
  * Retires the standalone Netlify deploy at audit.linkwhisper.com.
  * Phase 4 scope (v0.4.0): adds edges[] to /scan fullReport, tool column to
  * DB schema, tool-aware email subjects. Enables Internal Link Map tool.
+ * Phase 5 scope (v0.5.0): adds the bounded HTTP broken-link checker route.
  *
  * @package LW_Audit_Store
  */
@@ -34,7 +35,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Plugin constants. Bump LW_AUDIT_DB_VERSION on any schema change so the
  * installer re-runs dbDelta on the next activation / version check.
  */
-define( 'LW_AUDIT_VERSION', '0.4.0' );
+define( 'LW_AUDIT_VERSION', '0.5.0' );
 // DB v4: adds tool column for multi-tool segmentation (link-auditor, link-map, etc.).
 define( 'LW_AUDIT_DB_VERSION', '4' );
 define( 'LW_AUDIT_DIR', plugin_dir_path( __FILE__ ) );
@@ -48,6 +49,7 @@ require_once LW_AUDIT_DIR . 'includes/class-settings.php';
 require_once LW_AUDIT_DIR . 'includes/class-kit-client.php';
 require_once LW_AUDIT_DIR . 'includes/class-mailer.php';
 require_once LW_AUDIT_DIR . 'includes/class-crawler.php';
+require_once LW_AUDIT_DIR . 'includes/class-broken-link-crawler.php';
 require_once LW_AUDIT_DIR . 'includes/class-sitemap.php'; // extends LW_Audit_Crawler — must load after it
 require_once LW_AUDIT_DIR . 'includes/class-rest-controller.php';
 require_once LW_AUDIT_DIR . 'includes/class-cron.php';

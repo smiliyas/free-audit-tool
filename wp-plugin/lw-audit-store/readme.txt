@@ -4,7 +4,7 @@ Tags: linkwhisper, audit, internal-use
 Requires at least: 6.0
 Tested up to: 6.5
 Requires PHP: 7.4
-Stable tag: 0.3.0
+Stable tag: 0.5.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -14,12 +14,15 @@ System of record for Free Audit Tool submissions on linkwhisper.com. Internal-us
 
 Captures every Free Audit Tool submission (URL audited, scan stats, email, UTM) into a dedicated MySQL table on linkwhisper.com. Kit.com remains the email-delivery layer only — this plugin is the source of truth.
 
-Phase 1 (this version) ships the schema only:
+The current plugin provides:
 
 * `wp_lw_audits` — one row per audit submission
 * `wp_lw_audits_errors` — write-failure log
+* `POST /lw/v1/scan` — internal-link health crawl
+* `POST /lw/v1/broken-links` — bounded HTTP broken-link crawl
+* `POST /lw/v1/emails` — email capture, audit email, and Kit.com sync
 
-REST endpoints, admin page, and Kit.com integration land in Phases 2-4.
+The plugin is for LinkWhisper internal use and is not intended for wp.org.
 
 == Installation ==
 
@@ -33,6 +36,9 @@ REST endpoints, admin page, and Kit.com integration land in Phases 2-4.
 * Delete (uninstall) — drops `wp_lw_audits` + `wp_lw_audits_errors` and removes the schema-version option. No undo. Take a mysqldump first if uncertain.
 
 == Changelog ==
+
+= 0.5.0 =
+* Phase 5: add the bounded HTTP broken-link checker (`POST /lw/v1/broken-links`). It follows internal pages, validates unique HTTP(S) destinations, and reports broken links, redirects, timeouts, source pages, and partial-scan warnings.
 
 = 0.3.0 =
 * Phase 3: in-house PHP crawler (`POST /lw/v1/scan`) replaces the standalone Netlify deploy. React frontend on linkwhisper.com now calls this plugin for both crawl and capture — single origin, no CORS surface beyond what we control.

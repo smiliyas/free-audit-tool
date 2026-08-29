@@ -108,9 +108,9 @@ class LW_Audit_Installer {
 		//   email_status  — VARCHAR(20), not ENUM. dbDelta cannot diff ENUM
 		//                   value additions; adding a status later would
 		//                   require a manual ALTER. VARCHAR is forward-compat.
-		//   broken_count  — INT UNSIGNED NULL kept. Crawler doesn't compute it
-		//                   today (deadEndPages is the closest signal), but a
-		//                   nullable column avoids a future ALTER.
+		//   broken_count  — INT UNSIGNED NULL kept. The internal-link crawler
+		//                   leaves this nullable; the broken-link checker writes
+		//                   its HTTP-error count without a schema change.
 		//   created_at_gmt— Added DATETIME alongside created_at. Standard WP
 		//                   idiom (wp_posts has post_date + post_date_gmt).
 		//                   Nullable: Phase 2 REST handler writes the real UTC
