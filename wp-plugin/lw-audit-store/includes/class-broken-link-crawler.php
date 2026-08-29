@@ -43,7 +43,7 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 			return $site;
 		}
 
-		$wordpress = self::detect_wordpress( $site );
+		$wordpress = self::detect_wordpress_site( $site );
 		if ( is_wp_error( $wordpress ) ) {
 			return $wordpress;
 		}
@@ -189,7 +189,7 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 	 * @param array $site Normalized site context.
 	 * @return true|WP_Error
 	 */
-	private static function detect_wordpress( array $site ) {
+	private static function detect_wordpress_site( array $site ) {
 		$page_response = wp_remote_get(
 			$site['start_url'],
 			array(
