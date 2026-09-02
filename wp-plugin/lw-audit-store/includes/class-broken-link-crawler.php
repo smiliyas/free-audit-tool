@@ -22,6 +22,8 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 	const MAX_SOURCES_PER_LINK   = 5;
 	const CRAWL_TIME_S           = 30;
 	const CHECK_TIME_S           = 25;
+	const SCAN_TIME_S            = 55;
+	const REQUEST_GUARD_S        = 2;
 	const FETCH_TIMEOUT          = 10;
 	const LINK_TIMEOUT           = 8;
 	const WORDPRESS_DETECT_TIMEOUT = 8;
@@ -38,12 +40,13 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 	 * @return array|WP_Error { preview, fullReport } on success.
 	 */
 	public static function scan( $raw_url ) {
+		$scan_started = microtime( true );
 		$site = self::site_context( $raw_url );
 		if ( is_wp_error( $site ) ) {
 			return $site;
 		}
 
-		$wordpress = self::detect_wordpress_site( $site );
+		$wordpress = self::detect_wordpress_site( $site, $scan_started );
 		if ( is_wp_error( $wordpress ) ) {
 			return $wordpress;
 		}
@@ -59,7 +62,7 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 		$hit_time_cap  = false;
 
 		while ( ! empty( $queue ) ) {
-			if ( self::time_exceeded( $crawl_started, self::CRAWL_TIME_S ) ) {
+			if ( self::time_exceeded( $crawl_started, self::CRAWL_TIME_S ) || self::time_exceeded( $scan_started, self::SCAN_TIME_S ) ) {
 				$hit_time_cap = true;
 				break;
 			}
@@ -82,7 +85,7 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 				continue;
 			}
 
-			$responses = self::fetch_pages( array_column( $batch, 'url' ) );
+			$responses = self::fetch_pages( array_column( $batch, 'url' ), $scan_started );
 			foreach ( $batch as $item ) {
 				$page_url = $item['url'];
 				if ( empty( $responses[ $page_url ] ) ) {
@@ -113,6 +116,10 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 					}
 				}
 			}
+			if ( self::time_exceeded( $scan_started, self::SCAN_TIME_S ) ) {
+				$hit_time_cap = true;
+				break;
+			}
 		}
 
 		if ( empty( $pages ) ) {
@@ -123,7 +130,7 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 			);
 		}
 
-		$check_result = self::check_links( $links );
+		$check_result = self::check_links( $links, $scan_started );
 		$hit_time_cap  = $hit_time_cap || $check_result['hitTimeCap'];
 		$statuses      = $check_result['statuses'];
 
@@ -189,11 +196,20 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 	 * @param array $site Normalized site context.
 	 * @return true|WP_Error
 	 */
-	private static function detect_wordpress_site( array $site ) {
+	private static function detect_wordpress_site( array $site, $scan_started = null ) {
+		$page_timeout = self::broken_link_request_timeout( $scan_started, self::WORDPRESS_DETECT_TIMEOUT );
+		if ( $page_timeout <= 0 ) {
+			return new WP_Error(
+				'lw_wordpress_detection_failed',
+				self::WORDPRESS_DETECTION_ERROR_MESSAGE,
+				array( 'status' => 422 )
+			);
+		}
+
 		$page_response = wp_remote_get(
 			$site['start_url'],
 			array(
-				'timeout'             => self::WORDPRESS_DETECT_TIMEOUT,
+				'timeout'             => $page_timeout,
 				'redirection'         => 5,
 				'limit_response_size' => self::WORDPRESS_DETECT_BODY_SIZE,
 				'user-agent'          => self::USER_AGENT,
@@ -215,10 +231,19 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 			}
 		}
 
+		$rest_timeout = self::broken_link_request_timeout( $scan_started, self::WORDPRESS_DETECT_TIMEOUT );
+		if ( $rest_timeout <= 0 ) {
+			return new WP_Error(
+				'lw_wordpress_detection_failed',
+				self::WORDPRESS_DETECTION_ERROR_MESSAGE,
+				array( 'status' => 422 )
+			);
+		}
+
 		$rest_response = wp_remote_get(
 			$site['rest_url'],
 			array(
-				'timeout'             => self::WORDPRESS_DETECT_TIMEOUT,
+				'timeout'             => $rest_timeout,
 				'redirection'         => 2,
 				'limit_response_size' => 65536,
 				'user-agent'          => self::USER_AGENT,
@@ -336,11 +361,33 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 	}
 
 	/**
+	 * Keep the complete synchronous request inside the web server's usual
+	 * 60-second limit. The guard leaves time for PHP response assembly and
+	 * prevents a final outbound request from crossing that boundary.
+	 */
+	private static function broken_link_request_timeout( $scan_started, $configured_timeout ) {
+		if ( null === $scan_started ) {
+			return $configured_timeout;
+		}
+
+		$remaining = self::SCAN_TIME_S - ( microtime( true ) - $scan_started ) - self::REQUEST_GUARD_S;
+		if ( $remaining < 0.5 ) {
+			return 0;
+		}
+
+		return min( (float) $configured_timeout, $remaining );
+	}
+
+	/**
 	 * Fetch a small batch of HTML pages through Requests, with a sequential
 	 * WordPress HTTP fallback for older installations.
 	 */
-	private static function fetch_pages( array $urls ) {
+	private static function fetch_pages( array $urls, $scan_started = null ) {
 		if ( empty( $urls ) ) {
+			return array();
+		}
+		$timeout = self::broken_link_request_timeout( $scan_started, self::FETCH_TIMEOUT );
+		if ( $timeout <= 0 ) {
 			return array();
 		}
 
@@ -358,7 +405,7 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 
 		$requests_class = parent::requests_class();
 		if ( ! $requests_class ) {
-			return self::fetch_pages_sequential( $urls );
+			return self::fetch_pages_sequential( $urls, $scan_started );
 		}
 
 		try {
@@ -366,15 +413,15 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 				array( $requests_class, 'request_multiple' ),
 				$requests,
 				array(
-					'timeout'          => self::FETCH_TIMEOUT,
-					'connect_timeout'  => 5,
+					'timeout'          => $timeout,
+					'connect_timeout'  => min( 5, $timeout ),
 					'follow_redirects' => true,
 					'redirects'        => 5,
 					'verify'           => true,
 				)
 			);
 		} catch ( \Exception $e ) {
-			return self::fetch_pages_sequential( $urls );
+			return self::fetch_pages_sequential( $urls, $scan_started );
 		}
 
 		$out = array();
@@ -388,17 +435,21 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 		return $out;
 	}
 
-	protected static function fetch_pages_sequential( array $urls ) {
-		$args = array(
-			'timeout'     => self::FETCH_TIMEOUT,
-			'redirection' => 5,
-			'user-agent'  => self::USER_AGENT,
-			'headers'     => array(
-				'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-			),
-		);
+	protected static function fetch_pages_sequential( array $urls, $scan_started = null ) {
 		$out = array();
 		foreach ( $urls as $url ) {
+			$timeout = self::broken_link_request_timeout( $scan_started, self::FETCH_TIMEOUT );
+			if ( $timeout <= 0 ) {
+				break;
+			}
+			$args = array(
+				'timeout'     => $timeout,
+				'redirection' => 5,
+				'user-agent'  => self::USER_AGENT,
+				'headers'     => array(
+					'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+				),
+			);
 			$response = wp_remote_get( $url, $args );
 			if ( is_wp_error( $response ) ) {
 				continue;
@@ -499,15 +550,20 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 		}
 	}
 
-	private static function check_links( array $links ) {
+	private static function check_links( array $links, $scan_started = null ) {
 		$started  = microtime( true );
 		$urls     = array_keys( $links );
 		$statuses = array();
 		$offset   = 0;
 
-		while ( $offset < count( $urls ) && ! self::time_exceeded( $started, self::CHECK_TIME_S ) ) {
+		while ( $offset < count( $urls )
+			&& ! self::time_exceeded( $started, self::CHECK_TIME_S )
+			&& ( null === $scan_started || ! self::time_exceeded( $scan_started, self::SCAN_TIME_S ) ) ) {
 			$batch   = array_slice( $urls, $offset, self::CONCURRENCY * 2 );
-			$results = self::request_link_batch( $batch );
+			$results = self::request_link_batch( $batch, $scan_started );
+			if ( empty( $results ) ) {
+				break;
+			}
 			foreach ( $results as $url => $result ) {
 				$statuses[ $url ] = $result;
 			}
@@ -520,8 +576,12 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 		);
 	}
 
-	private static function request_link_batch( array $urls ) {
+	private static function request_link_batch( array $urls, $scan_started = null ) {
 		if ( empty( $urls ) ) {
+			return array();
+		}
+		$timeout = self::broken_link_request_timeout( $scan_started, self::LINK_TIMEOUT );
+		if ( $timeout <= 0 ) {
 			return array();
 		}
 
@@ -539,7 +599,7 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 
 		$requests_class = parent::requests_class();
 		if ( ! $requests_class ) {
-			return self::request_link_batch_sequential( $urls );
+			return self::request_link_batch_sequential( $urls, $scan_started );
 		}
 
 		try {
@@ -547,15 +607,15 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 				array( $requests_class, 'request_multiple' ),
 				$requests,
 				array(
-					'timeout'          => self::LINK_TIMEOUT,
-					'connect_timeout'  => 4,
+					'timeout'          => $timeout,
+					'connect_timeout'  => min( 4, $timeout ),
 					'follow_redirects' => false,
 					'redirects'        => 0,
 					'verify'           => true,
 				)
 			);
 		} catch ( \Exception $e ) {
-			return self::request_link_batch_sequential( $urls );
+			return self::request_link_batch_sequential( $urls, $scan_started );
 		}
 
 		$out = array();
@@ -563,24 +623,35 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 			$response = isset( $responses[ $url ] ) ? $responses[ $url ] : null;
 			$result   = self::classify_response( $response );
 			if ( in_array( $result['statusCode'], array( 405, 501 ), true ) ) {
-				$result = self::request_link_get( $url );
+				$fallback = self::request_link_get( $url, $scan_started );
+				if ( null !== $fallback ) {
+					$result = $fallback;
+				}
 			}
 			$out[ $url ] = $result;
 		}
 		return $out;
 	}
 
-	private static function request_link_batch_sequential( array $urls ) {
+	private static function request_link_batch_sequential( array $urls, $scan_started = null ) {
 		$out = array();
 		foreach ( $urls as $url ) {
-			$out[ $url ] = self::request_link_get( $url );
+			$result = self::request_link_get( $url, $scan_started );
+			if ( null === $result ) {
+				break;
+			}
+			$out[ $url ] = $result;
 		}
 		return $out;
 	}
 
-	private static function request_link_get( $url ) {
+	private static function request_link_get( $url, $scan_started = null ) {
+		$timeout = self::broken_link_request_timeout( $scan_started, self::LINK_TIMEOUT );
+		if ( $timeout <= 0 ) {
+			return null;
+		}
 		$args = array(
-			'timeout'          => self::LINK_TIMEOUT,
+			'timeout'          => $timeout,
 			'redirection'      => 0,
 			'limit_response_size' => 1024,
 			'user-agent'       => self::USER_AGENT,
