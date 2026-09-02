@@ -787,7 +787,7 @@ class LW_Broken_Link_Crawler extends LW_Audit_Crawler {
 		if ( $hit_time_cap ) {
 			$warnings[] = array(
 				'type'    => 'partial',
-				'message' => 'The checker stopped at its time budget. Some discovered destinations may not have been checked.',
+				'message' => 'The checker stops after its 60-second time budget. Some discovered destinations may not have been checked.',
 			);
 		}
 		if ( empty( $links ) ) {
